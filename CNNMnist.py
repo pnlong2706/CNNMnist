@@ -1,82 +1,120 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' #Hiding INFO and WARNING debugging information
+
+from scipy import ndimage
 import numpy as np
-import csv
 from matplotlib import pyplot as plt
+import tensorflow as tf
+import keras
+import timeit
 
-def convolve(mat, fil, st):
-    H = mat.shape[0]
-    W = mat.shape[1]
-    D = mat.shape[2]
-    B = mat.shape[3]
+def conv_forward(x,w,b,padding="same"):
+    f = w.shape[0] #size of filter
 
-    sz = fil.shape[0]
-    nF = fil.shape[3]
-    
-    nH = (H - sz)//st + 1
-    nW = (W - sz)//st + 1
-    
-    ans = np.zeros((nH,nW,nF,B))
-    
-    for ib in range(0, B):
-        for ft in range(0, nF):
-            for i in range(0, nH):
-                for j in range(0, nW):
-                    ans[i][j][ft][ib] = np.sum(mat[ (i*st):(i*st + sz), (j*st):(j*st + sz),:,ib] * fil[:,:,:,ft])
-                    
-    return ans
+    if padding=="same":
+        pad = (f-1)//2
+    else: #padding is valid - i.e no zero padding
+        pad =0
+    n = (x.shape[1]-f+2*pad) +1 #ouput width/height
 
-def AvrgPooling(mat, fil, st):
-    H = mat.shape[0]
-    W = mat.shape[1]
-    D = mat.shape[2]
-    B = mat.shape[3]
+    y = np.zeros((x.shape[0],n,n,w.shape[3])) #output array
 
-    sz = fil.shape[0]
-    
-    nH = (H - sz)//st + 1
-    nW = (W - sz)//st + 1
-    
-    ans = np.zeros((nH,nW,D,B))
-    
-    for ib in range(0, B):
-        for i in range(0, nH):
-            for j in range(0, nW):
-                temp = mat[ (i*st):(i*st + sz), (j*st):(j*st + sz),:,ib] * fil[:,:,:]
-                ans[i,j,:,ib] = np.sum(temp, (0,1))
-                    
-    return ans
+    #pad input
+    x_padded = np.pad(x,((0,0),(pad,pad),(pad,pad),(0,0)),'constant', constant_values = 0)
 
-def backPooling(size, dP, st):
-    H = dP.shape[0]
-    W = dP.shape[1]
-    
-    #print(size)
-    
-    ans = np.zeros(size)
-    
-    for ib in range (0, size[3]):
-        for d in range (0, size[2]):
-            for i in range(0, size[0]):
-                for j in range(0, size[1]):
-                    if(i//st < H and j//st < W): ans[i][j][d][ib] = 0.25 * dP[i//st][j//st][d][ib]
-                    
-    return ans
+    #flip filter to cancel out reflection
+    w = np.flip(w,0)
+    w = np.flip(w,1)
 
-def dwConvolve( size, mat, dZc ):
-    sz = dZc.shape[0]
-    
-    ans = np.zeros(size)
-    
-    for ib in range(0, mat.shape[3]):
-        for nf in range(0, size[3]):
-            for i in range(0, size[0]):
-                for j in range(0, size[1]):
 
-                    tt = dZc[:,:,nf,ib].reshape(sz,sz,1)
-                    temp = mat[ i:i+sz, j:j+sz, :, ib ] * tt
-                    
-                    ans[i,j,:,nf] +=  np.sum(temp, (0,1))
+    for m_i in range(x.shape[0]): #each of the training examples
+        for k in range(w.shape[3]): #each of the filters
+            for d in range(x.shape[3]): #each slice of the input
+                y[m_i,:,:,k]+= ndimage.convolve(x_padded[m_i,:,:,d],w[:,:,d,k])[f//2:-(f//2),f//2:-(f//2)] #sum across depth
+
+    y = y + b #add bias (this broadcasts across image)
+    return y
+
+def pool_forward(x,mode="max"):
+    if(x.shape[1]%2==1): x = x[:,1:x.shape[1],1:x.shape[2],:]
+    x_patches = x.reshape(x.shape[0],x.shape[1]//2, 2,x.shape[2]//2, 2,x.shape[3])
+
+    if mode=="max":
+        out = x_patches.max(axis=(2,4))
+        mask  =np.isclose(x,np.repeat(np.repeat(out,2,axis=1),2,axis=2)).astype(int)
+    elif mode=="average":
+        out =  x_patches.mean(axis=(2,4))
+        mask = np.ones_like(x)*0.25
+    return mask, out
+
+def pool_backward(dx, mask):
+    return mask*(np.repeat(np.repeat(dx,2,axis=1),2,axis=2))
+
+def conv_backward(dZ,x,w,padding="same"):
+    m = x.shape[0]
+
+    db = (1/m)*np.sum(dZ, axis=(0,1,2), keepdims=True)
+
+    if padding=="same":
+        pad = (w.shape[0]-1)//2
+    else: #padding is valid - i.e no zero padding
+        pad =0
+    x_padded = np.pad(x,((0,0),(pad,pad),(pad,pad),(0,0)),'constant', constant_values = 0)
+
+    #this will allow us to broadcast operations
+    x_padded_bcast = np.expand_dims(x_padded, axis=-1) # shape = (m, i, j, c, 1)
+    dZ_bcast = np.expand_dims(dZ, axis=-2) # shape = (m, i, j, 1, k)
+
+    dW = np.zeros_like(w)
+    f=w.shape[0]
+    w_x = x_padded.shape[1]
     
-    return ans 
+    for a in range(f):
+        for b in range(f):
+            #note f-1 - a rather than f-a since indexed from 0...f-1 not 1...f
+            dW[a,b,:,:] = (1/m)*np.sum(dZ_bcast*
+                x_padded_bcast[:,a:w_x-(f-1 -a),b:w_x-(f-1 -b),:,:],
+                axis=(0,1,2))
+            
+
+    dx = np.zeros_like(x_padded,dtype=float)
+    Z_pad = f-1
+    dZ_padded = np.pad(dZ,((0,0),(Z_pad,Z_pad),(Z_pad,Z_pad),
+    (0,0)),'constant', constant_values = 0)
+
+    for m_i in range(x.shape[0]):
+        for k in range(w.shape[3]):
+            for d in range(x.shape[3]):
+                dx[m_i,:,:,d]+=ndimage.convolve(dZ_padded[m_i,:,:,k],
+                w[:,:,d,k])[f//2:-(f//2),f//2:-(f//2)]
+    dx = dx[:,pad:dx.shape[1]-pad,pad:dx.shape[2]-pad,:]
+    return dx,dW,db
+
+class layer:    
+    #This class will hold value of w and b, input size and size of w, activation type and padding depend on layer type
+    def __init__(self, type, size = (2,2), input_size = (2,2), activation = "relu", padding = "same"):
+        self.type = type
+        self.input_size = input_size
+        if(type == "maxPool"): return
+        if(type == "avgPool"): return
+        if(type == "flatten"): return
+        if(type == "dense"):
+            if(activation!="relu" and activation!="tanh" and activation!="sigmoid" and activation!= "softmax"):
+                raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid")
+            self.activation = activation
+            self.size = size
+            self.W = np.random.rand(size, input_size) - 0.5
+            self.b = np.random.rand(size,1) - 0.5
+            return
+        if(type == "conv"):
+            if(activation!="relu" and activation!="tanh" and activation!="sigmoid" and activation!= "softmax"):
+                raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid")
+            if(padding != "same" and padding != "valid"): raise Exception("Sorry, padding types allowed is: valid or same")
+            self.padding = padding
+            self.activation = activation
+            self.size = size
+            self.W = np.random.randn(*size)
+            self.b = np.random.randn(size[3])
 
 class MnistTraing:
     X_alltrain = []
@@ -88,147 +126,89 @@ class MnistTraing:
     costX = []
     costY = []
     nLayer = 0
-    nNode = []
-    arW = []
-    arb = []
-    caches = []
-    rate = 0.1
+    rate = 0.01
     batchSize = 100
-    iter = 0
-    Activation = ""
-    
-    Zc1 = []
-    Ac1 = []
-    Ac2 = []
-    Ac3 = []
-    Xc = []
-    
-    Conv1Filter = np.zeros(1)
-    Conv1Pool = np.zeros((2,2,8)) + 0.25
-    
-    def loadDataFromFile(self,s_train,M,s_test,L):
-        CX=[]
-        CY=[]
-        with open(s_train) as csv_file:
-            csv_reader = csv.reader(csv_file, delimiter=',')
-            line=0
-            for row in csv_reader:
-                if line==0:
-                    line +=1
-                else:
-                    CY.append( eval(row[0]) )
-                    CX.append( [ eval(i)/255 for i in row[1:785] ] )
-                    line+=1
-            
-                if line==M+1:
-                    break
+    layers = []
         
-        self.X_alltrain=(np.array(CX)).T
-        self.Y_alltrain=np.array(CY)
+    def loadDataFromKeras(self, n_train, n_test):
+        # Load Mnist data from keras, the training set will have shape: (n_train, 28, 28, 1), similar with validation set
+        (self.X_alltrain, self.Y_alltrain), (self.X_test, self.Y_test) = keras.datasets.mnist.load_data()
+
+        self.X_alltrain = np.expand_dims(self.X_alltrain, -1)
+        self.X_test = np.expand_dims(self.X_test, -1)
         
-        CX=[]
-        CY=[]
-        with open(s_test) as csv_file:
-            csv_reader = csv.reader(csv_file, delimiter=',')
-            line=0
-            for row in csv_reader:
-                if line==0:
-                    line +=1
-                else:
-                    CY.append( eval(row[0]) )
-                    CX.append( [ eval(i)/255 for i in row[1:785] ] )
-                    line+=1
-            
-                if line==L+1:
-                    break
-                
-        self.X_test=(np.array(CX)).T
-        self.X_test = self.X_test.reshape((28,28,1,L))
-        self.Y_test=np.array(CY)
+        self.X_alltrain = self.X_alltrain.astype("float32") / 255
+        self.X_test = self.X_test.astype("float32") / 255
+        self.Y_alltrain = self.Y_alltrain.astype("float32")
+        self.Y_test = self.Y_test.astype("float32")
+        
+        if(n_train == 60000 and n_test == 10000): return
+        
+        self.X_alltrain = self.X_alltrain[0:n_train,:,:,:]
+        self.Y_alltrain = self.Y_alltrain[0:n_train]
+        self.X_test = self.X_test[0:n_test,:,:,:]
+        self.Y_test = self.Y_test[0:n_test]
         
     def shullfeData(self):
-        per =  np.random.permutation(self.X_alltrain.shape[1])
-        self.X_alltrain = self.X_alltrain[:, per]
+        # Shuffle data for each epoch
+        per =  np.random.permutation(self.X_alltrain.shape[0])
+        self.X_alltrain = self.X_alltrain[per,:,:,:]
         self.Y_alltrain = self.Y_alltrain[per]
         self.iter = 0
         
     def loadBacth(self,iter):
-        self.X_train = self.X_alltrain[:,iter*self.batchSize: (iter+1)*self.batchSize ]
-        self.Y_train = self.Y_alltrain[iter*self.batchSize: (iter+1)*self.batchSize ]
-        self.X_train = self.X_train.reshape((28,28,1,self.batchSize))
-        #print(self.X_train.shape)
+        self.X_train = self.X_alltrain[iter*self.batchSize: (iter+1)*self.batchSize, :, :, :]
+        self.Y_train = self.Y_alltrain[iter*self.batchSize: (iter+1)*self.batchSize]
         
     def setBacthSize(self, a):
         self.batchSize = a
-    
-    def setLayer(self,x, A ):
-        self.nLayer = x
-        for i in A:
-            self.nNode.append(i)
-            
-    def setActivation(self,s):
-        self.Activation = s
-        if(s!="relu" and s!="tanh" and s!="sigmoid" ):
-            raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid")
         
-    def setLearningRate(self,a):
-        self.rate = a
-        
-    def randomPara(self):
-        for i in range (0,self.nLayer-1) :
-            temp_W = np.random.rand( self.nNode[i+1] ,self.nNode[i])-0.5
-            self.arW.append( temp_W )
-            temp_b = np.random.rand(self.nNode[i+1],1)-0.5
-            self.arb.append( temp_b )
+    def add(self,layer):
+        self.layers.append(layer)
+        self.nLayer += 1
             
-        self.Conv1Filter = np.random.randn(3,3,1,8)
-            
-    def ActivationFunc(self, Z):
-        if(self.Activation=="relu"):
+    def ActivationFunc(self, Z, type):
+        if(type=="relu"):
             return np.maximum(0,Z)
-        elif(self.Activation=="tanh"):
+        elif(type=="tanh"):
             return (np.exp(Z)-np.exp(-Z))/(np.exp(Z)+np.exp(-Z))
-        elif(self.Activation=="sigmoid"):
+        elif(type=="sigmoid"):
             return 1/(1+np.exp(-Z))
-        
-    def DeriAcFunc(self, Z):
-        if(self.Activation=="relu"):
-            return Z > 0
-        elif(self.Activation=="tanh"):
-            return 1 - np.square(self.ActivationFunc(Z))
-        elif(self.Activation=="sigmoid"):
+        elif(type == "softmax"):
             exps=np.exp(Z-Z.max())
-            return exps / exps.sum(axis=0)
+            return exps / exps.sum(axis=0) + 1e-7
         
-    def SoftMaxFunc(self, Z):
-        exps=np.exp(Z-Z.max())
-        return exps / exps.sum(axis=0)
-            
+    def setLearningRate(self, rate):
+        self.rate = rate
+        
+    def DeriAcFunc(self, Z, type):   
+        # derivative of activation function
+        if(type=="relu"):
+            return Z > 0
+        elif(type=="tanh"):
+            return 1 - np.square(self.ActivationFunc(Z))
+        elif(type=="sigmoid"):
+            exps=np.exp(Z-Z.max())
+            return exps / (exps.sum(axis=0)+1e-8) + 1e-8
+    
     def feedForward(self, X_train):
-        self.Zc1 = convolve(X_train, self.Conv1Filter,1)
-        self.Ac1 = self.ActivationFunc(self.Zc1)
-        # print(self.Conv1Pool)
-        self.Ac2 = AvrgPooling(self.Ac1, self.Conv1Pool, 2)
-        self.Ac3 = AvrgPooling(self.Ac2, self.Conv1Pool, 2)
-        #print(self.Ac3.shape)
-
-        X = self.Ac3.reshape((288,self.Ac3.shape[3]))
-        self.Xc = X
-        
-        self.caches.clear()
-        Aprv = X
-        for i in range (0, self.nLayer-2):
-            Z = np.dot(self.arW[i],Aprv)
-            A = self.ActivationFunc(Z)
-            Aprv = A
-            self.caches.append((Z,A))
-            
-        id = self.nLayer-2
-        
-        Z = np.dot(self.arW[id], Aprv)
-        A = self.SoftMaxFunc(Z)
-        self.caches.append((Z,A))
-
+        A = []
+        A.append((X_train,X_train))
+        for iL in range (0, self.nLayer):
+            layer = self.layers[iL]
+            if(layer.type == "maxPool"):
+                A.append(pool_forward(A[-1][1],"max"))
+            elif(layer.type == "avgPool"):
+                A.append(pool_forward(A[-1][1],"average"))
+            elif(layer.type == "conv"):
+                Z = conv_forward(A[-1][1],layer.W, layer.b, layer.padding)
+                A.append( (Z, self.ActivationFunc(Z,layer.activation)) )
+            elif(layer.type == "dense"):
+                Z = np.dot(layer.W, A[-1][1]) + layer.b
+                A.append( (Z, self.ActivationFunc(Z, layer.activation) ))
+            elif(layer.type == "flatten"):
+                A.append( (A[-1][1], A[-1][1].reshape( A[-1][1].shape[0], A[-1][1].shape[1] * A[-1][1].shape[2] * A[-1][1].shape[3] ).T) )
+                
         return A
     
     def checkRes(self, Y):
@@ -258,74 +238,63 @@ class MnistTraing:
     def accuracy(self,predict, Y):
         return np.sum(predict == Y) / Y.size
     
-    def feedBackward(self):
-        Ycheck = self.checkRes(self.Y_train)
-        m = self.Y_train.size
-        id = self.nLayer-2
-        dW = []
-        db = []
-        
-        t_dZ = self.caches[id][1] - Ycheck
-        t_dW = 1 / m * np.dot(t_dZ,self.caches[id-1][1].T) 
-        t_db = 1 / m * np.sum(t_dZ)
-        prv_dZ = t_dZ
-        
-        dW.append(t_dW)
-        db.append(t_db)
-        
-        for i in range (self.nLayer-3,-1,-1):
-            if(i==0):
-                t_dZ = np.dot( self.arW[i+1].T, prv_dZ ) * self.DeriAcFunc(self.caches[i][0])
-                t_dW = 1/m * np.dot( t_dZ, self.Xc.T )
-                t_db = 1/m * np.sum(t_dZ)
-                prv_dZ = t_dZ
-            else:
-                t_dZ = np.dot( self.arW[i+1].T, prv_dZ ) * self.DeriAcFunc(self.caches[i][0])
-                t_dW = 1/m * np.dot( t_dZ, self.caches[i-1][1].T )
-                t_db = 1/m * np.sum(t_dZ)
-                prv_dZ = t_dZ
-                
-            dW.append(t_dW)
-            db.append(t_db)
-                
-        dW.reverse()
-        db.reverse()
-        
-        #print(prv_dZ)
-        
-        dXc = np.dot( self.arW[0].T, prv_dZ ) * self.DeriAcFunc(self.Xc)
-        #print(dXc[:,0])
-        dAc3 = dXc.reshape((6,6,8,self.batchSize))
-        
-        dAc2 = backPooling(self.Ac2.shape, dAc3,2)
-        dAc1 = backPooling(self.Ac1.shape, dAc2,2)
-        dZc1 = dAc1 * self.DeriAcFunc(self.Zc1)
-        
-        dF1 = dwConvolve( ((3,3,1,8)), self.X_train, dZc1)/self.batchSize
-        
-        #print(dF1[:,:,0,:])
-        
-        return dW, db, dF1
-    
-    def gradientDescent(self, dW, db, dF1):
-        for i in range (0, self.nLayer-1):
-            self.arW[i] = self.arW[i] - self.rate * dW[i]
-            self.arb[i] = self.arb[i] - self.rate * db[i]
+    def feedBackward(self, A):
+        dW = 0
+        db = 0
+        dZ = 0
+        dA = 0
+        for iL in range(self.nLayer,0,-1):
+            layer = self.layers[iL-1]
             
-        self.Conv1Filter = self.Conv1Filter - self.rate * dF1 
+            if(layer.type == "dense" and layer.activation == "softmax"):
+                Ycheck = self.checkRes(self.Y_train)
+                m = self.batchSize
+                dZ = A[iL][1] - Ycheck
+                dW = 1 / m * np.dot(dZ, A[iL-1][1].T)
+                db = 1 / m * np.sum(dZ)
+                dA = np.dot( layer.W.T, dZ )
+                
+            elif(layer.type == "dense"):
+                m = self.batchSize
+                dZ = dA * self.DeriAcFunc(A[iL][0], layer.activation)
+                dW = 1 / m * np.dot(dZ, A[iL-1][1].T)
+                db = 1 / m * np.sum(dZ)
+                dA = np.dot( layer.W.T, dZ )
             
+            elif(layer.type == "flatten"):
+                dZ = dA.T.reshape(layer.input_size)
+                dA = dZ
+                continue
+            
+            elif(layer.type == "avgPool" or layer.type == "maxPool" ):
+                dZ = pool_backward(dA, A[iL][0])
+                dA = dZ
+                continue
+            
+            elif(layer.type == "conv"):
+                dZ = dA * self.DeriAcFunc(A[iL][0], layer.activation)
+                dA, dW, db = conv_backward(dZ, A[iL-1][1], self.layers[iL-1].W, layer.padding)
+                
+            else: continue
+            
+            Lrate = 0.006
+            if( layer.type == "dense" ): Lrate = self.rate * 10
+            else: Lrate = self.rate
+             
+            self.layers[iL-1].W = self.layers[iL-1].W - Lrate * dW
+            self.layers[iL-1].b = self.layers[iL-1].b - Lrate * db
+     
     def training(self):
         A = self.feedForward(self.X_train)
-        dW, db, DF1 = self.feedBackward()
-        self.gradientDescent(dW, db, DF1)
+        self.feedBackward(A)
         
-        return self.accuracy( self.predict(A), self.Y_train ), A
+        return self.accuracy( self.predict(A[-1][1]), self.Y_train ), A[-1][1]
                 
     def trainingMnist(self, epoch):
         for i in range (0, epoch):
             s = 0
             cs = 0
-            self.shullfeData()
+            #self.shullfeData()
             n_iter = round(self.Y_alltrain.size / self.batchSize)
             for j in range (0, n_iter):
                 self.loadBacth(j)
@@ -339,32 +308,7 @@ class MnistTraing:
             
     def testing(self):
         A = self.feedForward(self.X_test)
-        print("Accuracy: ", self.accuracy( self.predict(A), self.Y_test ) )
-    
-#MAIN FUNCTION    
-Train = MnistTraing()
-
-Train.loadDataFromFile("mnist_train.csv",210,"mnist_test.csv",67)
-
-Train.setBacthSize(30)
-Train.setLayer(3,[288,128,10])
-Train.setActivation("relu")
-Train.setLearningRate(0.1)
-Train.randomPara()
-
-# Train.loadBacth(0)
-# A = Train.feedForward(Train.X_train)
-# Train.feedBackward()
-# print(Train.accuracy( Train.predict(A), Train.Y_train ))
-
-Train.trainingMnist(11)
-
-print("TESTING SET:")
-Train.testing()
-
-plt.plot(Train.costX, Train.costY)
-plt.show()
-
+        print("Accuracy: ", self.accuracy( self.predict(A[-1][1]), self.Y_test ) )
 
 
 
