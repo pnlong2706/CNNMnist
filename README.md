@@ -16,11 +16,11 @@ I designed a class called MnistTraining for training models to identify numbers 
     - Convolutional layer: `model_name.add(layer("conv", filter_shape, input_shape, activation, padding))`; filter_shape is a 4D tensor with shape (H, W, D, N) - N is the number of filters; input_shape is a 3D tensor with shape (H, W, D); activation allowed is "relu", "tanh", "sigmoid", and "softmax" for last layer; padding is "same" or "valid". The stride for this layer is set to 1 and you can not change it.
     - Max Pooling layer: `model_name.add(layer("maxPool"))`, you can just use a 2x2 filter and stride 2 for the pooling layer.
     - Average Pooling layer: `model_name.add(layer("avgPool"))`
-    - Flatten layer: `model_name.add(layer("flatten", output_shape, input_shape))`, you have to pass both input_shape and output_shape here =)). The input_shape is a 4D tensor: (M, H, W, D) - M is the number of samples. The output_shape should be (H *W *D, M), you have to calculate it though it seems kinda unnecessary, but it's still ok right?
+    - Flatten layer: `model_name.add(layer("flatten", output_shape, input_shape))`, you have to pass both input_shape and output_shape here =)). The input_shape is a 3D tensor: (H, W, D). The output_shape should be H *W *D,  you have to calculate it though it seems kinda unnecessary, but it's still ok right?
     - Dense layer: `model_name.add(layer("dense",n_node,n_node_prv,activation))`, n_node is the number of nodes in this layer, n_node_prv is number of node in previous layer.
 -  The last layer should have 10 nodes for 10 numbers and use softmax.
 -  Finally, you can use `model_name.trainingMnist(number_of_epochs)` to train your model and `model_name.testing()` to test your model with validation test loaded before.
 
 ## Few drawbacks:
 -  The source code still has some bugs, because I haven't handled exploding numbers yet. I will update it when I stop being lazy.
--  Function for forwarding and backwarding of the convolutional layer is better than before but it's not ultimately optimized, with 60k samples, each epoch will take about 1 min.
+-  The function for forwarding and backwarding of the convolutional layer is better than before but it's not ultimately optimized, with 60k samples, each epoch will take about 1 min.
