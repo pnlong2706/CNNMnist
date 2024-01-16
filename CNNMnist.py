@@ -262,7 +262,7 @@ class MnistTraining:
                 dA = np.dot( layer.W.T, dZ )
             
             elif(layer.type == "flatten"):
-                dZ = dA.T.reshape(layer.input_size)
+                dZ = dA.T.reshape( dA.shape[1], layer.input_size[0], layer.input_size[1], layer.input_size[2])
                 dA = dZ
                 continue
             
@@ -309,6 +309,14 @@ class MnistTraining:
     def testing(self):
         A = self.feedForward(self.X_test)
         print("Accuracy: ", self.accuracy( self.predict(A[-1][1]), self.Y_test ) )
+
+    def visualTest(self, n):
+        A = self.feedForward(np.expand_dims(self.X_test[n,:,:,:], axis = 0 ))
+        print("Test", n)
+        print("Predict:", self.predict(A[-1][1])[0])
+        print("Label:", self.Y_test[n])
+        plt.imshow(self.X_test[n,:,:,0])
+        plt.show()
 
 
 
