@@ -1,11 +1,11 @@
 import timeit
 from matplotlib import pyplot as plt
 
-from CNNMnist import MnistTraing
+from CNNMnist import MnistTraining
 from CNNMnist import layer
 
 #MAIN FUNCTION    
-TrainModel = MnistTraing()
+TrainModel = MnistTraining()
 
 TrainModel.loadDataFromKeras(1000,100)
 TrainModel.setBacthSize(100)
