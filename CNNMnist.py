@@ -100,15 +100,15 @@ class layer:
         if(type == "flatten"): return
         if(type == "dense"):
             if(activation!="relu" and activation!="tanh" and activation!="sigmoid" and activation!= "softmax"):
-                raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid")
+                raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid, softmax")
             self.activation = activation
             self.size = size
             self.W = np.random.rand(size, input_size) - 0.5
             self.b = np.random.rand(size,1) - 0.5
             return
         if(type == "conv"):
-            if(activation!="relu" and activation!="tanh" and activation!="sigmoid" and activation!= "softmax"):
-                raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid")
+            if(activation!="relu" and activation!="tanh" and activation!="sigmoid"):
+                raise Exception("Sorry, activation functions allowed in 'conv' is: relu, tanh, sigmoid")
             if(padding != "same" and padding != "valid"): raise Exception("Sorry, padding types allowed is: valid or same")
             self.padding = padding
             self.activation = activation
@@ -116,7 +116,7 @@ class layer:
             self.W = np.random.randn(*size)
             self.b = np.random.randn(size[3])
 
-class MnistTraing:
+class MnistTraining:
     X_alltrain = []
     Y_alltrain = []
     X_train = []
