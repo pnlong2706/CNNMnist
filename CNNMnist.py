@@ -327,8 +327,8 @@ class MnistTraining:
         plt.plot(self.loss, label = "Training loss" )
         plt.plot(self.loss_t, label = "Validation loss")
         plt.title("Loss graph")
-        plt.xlabel("Loss")
-        plt.ylabel("Epoch")
+        plt.ylabel("Loss")
+        plt.xlabel("Epoch")
         plt.legend()
         plt.show()
         
@@ -336,8 +336,8 @@ class MnistTraining:
         plt.plot(self.acu, label = "Training accuracy" )
         plt.plot(self.acu_t, label = "Validation accuracy" )
         plt.title("Accuracy graph")
-        plt.xlabel("Accuracy")
-        plt.ylabel("Epoch")
+        plt.ylabel("Accuracy")
+        plt.xlabel("Epoch")
         plt.legend()
         plt.show()
 
