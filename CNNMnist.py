@@ -188,7 +188,7 @@ class MnistTraining:
         if(type=="relu"):
             return Z > 0
         elif(type=="tanh"):
-            return 1 - np.square(self.ActivationFunc(Z))
+            return 1 - np.square(self.ActivationFunc(Z, type))
         elif(type=="sigmoid"):
             exps=np.exp(Z-Z.max())
             return exps / (exps.sum(axis=0)+1e-8) + 1e-8
