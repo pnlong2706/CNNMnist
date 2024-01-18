@@ -22,5 +22,4 @@ I designed a class called MnistTraining for training models to identify numbers 
 -  Finally, you can use `model_name.trainingMnist(number_of_epochs)` to train your model and `model_name.testing()` to test your model with validation test loaded before.
 
 ## Few drawbacks:
--  The source code still has some bugs, because I haven't handled exploding numbers yet. I will update it when I stop being lazy.
 -  The function for forwarding and backwarding of the convolutional layer is better than before but it's not ultimately optimized, with 60k samples, each epoch will take about 1 min.
