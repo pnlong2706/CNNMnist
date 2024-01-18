@@ -113,8 +113,8 @@ class layer:
             self.padding = padding
             self.activation = activation
             self.size = size
-            self.W = np.random.randn(*size)
-            self.b = np.random.randn(size[3])
+            self.W = np.ones(size) / 100
+            self.b = np.ones((size[3])) / 100
 
 class MnistTraining:
     X_alltrain = []
@@ -123,8 +123,10 @@ class MnistTraining:
     Y_train = []
     X_test = []
     Y_test = []
-    costX = []
-    costY = []
+    loss = [] 
+    acu = []
+    loss_t = []
+    acu_t = []
     nLayer = 0
     rate = 0.01
     batchSize = 100
@@ -294,7 +296,7 @@ class MnistTraining:
         for i in range (0, epoch):
             s = 0
             cs = 0
-            #self.shullfeData()
+            self.shullfeData()
             n_iter = round(self.Y_alltrain.size / self.batchSize)
             for j in range (0, n_iter):
                 self.loadBacth(j)
@@ -302,20 +304,49 @@ class MnistTraining:
                 s += m
                 cs += self.cost(self.checkRes(self.Y_train),A)
                 
-            print("[Epoch] ", i, ". Accuracy: ", s/n_iter, ";")
-            self.costX.append(i)
-            self.costY.append(cs/self.batchSize)
+            A_test, Acu_test = self.testing(0)
+            Cost_test = self.cost(self.checkRes(self.Y_test), A_test)
             
-    def testing(self):
+            print("[Epoch]", i, ", Train accuracy =", s/n_iter, ", Validation accuracy =", Acu_test)
+            self.loss.append(cs/n_iter)
+            self.acu.append(s/n_iter)
+            self.loss_t.append(Cost_test)
+            self.acu_t.append(Acu_test)
+            
+    def testing(self, showInfo):
         A = self.feedForward(self.X_test)
-        print("Accuracy: ", self.accuracy( self.predict(A[-1][1]), self.Y_test ) )
+        Pred = self.predict(A[-1][1])
+        Acurracy = self.accuracy( Pred , self.Y_test )
+        if(showInfo):
+            print("Accuracy: ", Acurracy )
+            print("Tests failed: ", np.nonzero(Pred - self.Y_test)[0] )
+            
+        return A[-1][1], Acurracy
+
+    def lossGraph(self):
+        plt.plot(self.loss, label = "Training loss" )
+        plt.plot(self.loss_t, label = "Validation loss")
+        plt.title("Loss graph")
+        plt.xlabel("Loss")
+        plt.ylabel("Epoch")
+        plt.legend()
+        plt.show()
+        
+    def accuracyGraph(self):
+        plt.plot(self.acu, label = "Training accuracy" )
+        plt.plot(self.acu_t, label = "Validation accuracy" )
+        plt.title("Accuracy graph")
+        plt.xlabel("Accuracy")
+        plt.ylabel("Epoch")
+        plt.legend()
+        plt.show()
 
     def visualTest(self, n):
         A = self.feedForward(np.expand_dims(self.X_test[n,:,:,:], axis = 0 ))
         print("Test", n)
         print("Predict:", self.predict(A[-1][1])[0])
         print("Label:", self.Y_test[n])
-        plt.imshow(self.X_test[n,:,:,0])
+        plt.imshow(self.X_test[n,:,:,0], cmap='gray' )
         plt.show()
 
 
