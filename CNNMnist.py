@@ -103,7 +103,7 @@ class layer:
                 raise Exception("Sorry, activation functions allowed is: relu, tanh, sigmoid, softmax")
             self.activation = activation
             self.size = size
-            self.W = np.random.uniform(0.4, 1.0, size) / 100
+            self.W = np.random.rand(size, input_size) - 0.5
             self.b = np.random.rand(size,1) - 0.5
             return
         if(type == "conv"):
@@ -113,7 +113,7 @@ class layer:
             self.padding = padding
             self.activation = activation
             self.size = size
-            self.W = np.ones(size) / 100
+            self.W = np.random.uniform(0.4, 1.0, size) / 100
             self.b = np.ones((size[3])) / 100
 
 class MnistTraining:
